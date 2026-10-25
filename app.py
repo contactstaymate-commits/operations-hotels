@@ -1,4 +1,4 @@
-"""Plateforme opérations hôtels + prestataires (multi-hôtels).
+"""STAYDESK : opérations hôtels + prestataires (multi-hôtels).
 Lancer : ADMIN_EMAIL=... ADMIN_PASSWORD=... uvicorn app:app --port 8000
 Rôles : hôtel (agent < responsable < patron), prestataire, admin plateforme."""
 import base64, hashlib, io, json, os, re, secrets, sqlite3, time
@@ -20,7 +20,7 @@ CAT2TRADE = {"plomberie": "plomberie", "électricité": "électricité", "climat
              "mobilier": "menuiserie", "ménage": "nettoyage", "literie/linge": "nettoyage"}
 ROLES = {"agent": 1, "responsable": 2, "patron": 3}
 
-app = FastAPI(title="Plateforme Opérations Hôtels")
+app = FastAPI(title="STAYDESK")
 
 def db():
     c = sqlite3.connect(DB_PATH); c.row_factory = sqlite3.Row; return c
@@ -46,6 +46,9 @@ def init():
         CREATE TABLE IF NOT EXISTS missions(id INTEGER PRIMARY KEY AUTOINCREMENT, org_id INTEGER, ticket_id INTEGER, trade TEXT, city TEXT, note TEXT,
           budget_mad REAL, status TEXT DEFAULT 'ouverte', provider_id INTEGER, created REAL, accepted REAL, done REAL, final_price REAL,
           commission REAL, done_note TEXT, done_photo TEXT, rating INTEGER, rating_comment TEXT, commission_paid INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS standards(id INTEGER PRIMARY KEY AUTOINCREMENT, org_id INTEGER, name TEXT, category TEXT, mode TEXT, qty REAL, pos INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS room_state(place_id INTEGER PRIMARY KEY, org_id INTEGER, guests INTEGER DEFAULT 0, arrival TEXT, departure TEXT, language TEXT, notes TEXT, updated REAL);
+        CREATE TABLE IF NOT EXISTS checks(id INTEGER PRIMARY KEY AUTOINCREMENT, org_id INTEGER, place_id INTEGER, user_id INTEGER, ts REAL, guests INTEGER, answers TEXT, missing INTEGER, photo TEXT, ai TEXT, ticket_id INTEGER);
         CREATE TABLE IF NOT EXISTS notifs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ts REAL, text TEXT, link TEXT, read INTEGER DEFAULT 0);
         """)
         em, pw = os.getenv("ADMIN_EMAIL"), os.getenv("ADMIN_PASSWORD")
@@ -77,6 +80,14 @@ def admin(token):
 
 from contextvars import ContextVar
 PEND = ContextVar("pend", default=None)
+
+DEFAULT_STANDARDS = [("Serviettes de bain", "linge", "par_personne", 1), ("Serviettes de main", "linge", "par_personne", 1), ("Tapis de bain", "linge", "par_chambre", 1),
+    ("Bouteilles d'eau", "consommable", "par_personne", 2), ("Gel douche / savon", "consommable", "par_personne", 1), ("Papier toilette", "consommable", "par_chambre", 2),
+    ("Menu du restaurant", "documents", "par_chambre", 1)]
+
+def seed_standards(c, org_id):
+    for i, (n, cat, mode, q) in enumerate(DEFAULT_STANDARDS):
+        c.execute("INSERT INTO standards(org_id,name,category,mode,qty,pos) VALUES(?,?,?,?,?,?)", (org_id, n, cat, mode, q, i))
 
 def notify(user_id, text, link=""):
     """Mise en file : écrite après la requête (évite les verrous SQLite imbriqués)."""
@@ -144,6 +155,7 @@ def signup_hotel(b: SignupHotel, request: Request):
             uid = c.execute("INSERT INTO users(org_id,name,email,pw,role,created) VALUES(?,?,?,?, 'patron',?)", (oid, b.name.strip(), email, hash_pw(b.password), time.time())).lastrowid
             for i in (101, 102, 103): c.execute("INSERT INTO places(org_id,name,kind) VALUES(?,?,?)", (oid, f"Chambre {i}", "chambre"))
             for n, k in (("Réception", "commun"), ("Restaurant", "commun"), ("Piscine", "commun")): c.execute("INSERT INTO places(org_id,name,kind) VALUES(?,?,?)", (oid, n, k))
+            seed_standards(c, oid)
             tok = start_session(c, uid)
     except sqlite3.IntegrityError: raise HTTPException(409, "Cet email est déjà utilisé")
     return {"token": tok}
@@ -527,7 +539,139 @@ def admin_resolve(mid: int, b: Confirm, x_token: str = Header(default="")):
         if b.price_ok: c.execute("UPDATE tickets SET status='resolu', resolved=? WHERE id=?", (time.time(), m["ticket_id"]))
     return {"ok": True}
 
+
+# ---------- standards de chambre, séjours, contrôles ----------
+LANGS = {"fr": "Français", "en": "English", "ar": "العربية", "es": "Español", "de": "Deutsch"}
+
+def expected_items(c, org_id, guests, language):
+    rows = c.execute("SELECT * FROM standards WHERE org_id=? ORDER BY pos,id", (org_id,)).fetchall()
+    if not rows: seed_standards(c, org_id); rows = c.execute("SELECT * FROM standards WHERE org_id=? ORDER BY pos,id", (org_id,)).fetchall()
+    out = []
+    for r in rows:
+        exp = r["qty"] * guests if r["mode"] == "par_personne" else r["qty"]
+        out.append({"id": r["id"], "name": r["name"], "category": r["category"], "mode": r["mode"], "qty": r["qty"], "expected": int(exp) if exp == int(exp) else exp,
+                    "language": LANGS.get(language) if r["category"] == "documents" and language else None})
+    return out
+
+@app.get("/api/standards")
+def get_standards(x_token: str = Header(default="")):
+    u = hotel(x_token)
+    with db() as c:
+        if not c.execute("SELECT 1 FROM standards WHERE org_id=?", (u["org_id"],)).fetchone(): seed_standards(c, u["org_id"])
+        return [dict(r) for r in c.execute("SELECT * FROM standards WHERE org_id=? ORDER BY pos,id", (u["org_id"],))]
+
+class StandardIn(BaseModel): name: str; category: str = "consommable"; mode: str = "par_personne"; qty: float = 1
+
+@app.post("/api/standards")
+def add_standard(b: StandardIn, x_token: str = Header(default="")):
+    u = hotel(x_token, "responsable")
+    if b.mode not in ("par_personne", "par_chambre") or b.category not in ("linge", "consommable", "documents", "autre") or not b.name.strip() or not 0 < b.qty <= 100: raise HTTPException(400, "Champs invalides")
+    with db() as c:
+        pos = (c.execute("SELECT COALESCE(MAX(pos),0)+1 FROM standards WHERE org_id=?", (u["org_id"],)).fetchone()[0])
+        return {"id": c.execute("INSERT INTO standards(org_id,name,category,mode,qty,pos) VALUES(?,?,?,?,?,?)", (u["org_id"], b.name.strip(), b.category, b.mode, b.qty, pos)).lastrowid}
+
+@app.delete("/api/standards/{sid}")
+def del_standard(sid: int, x_token: str = Header(default="")):
+    u = hotel(x_token, "responsable")
+    with db() as c: c.execute("DELETE FROM standards WHERE id=? AND org_id=?", (sid, u["org_id"]))
+    return {"ok": True}
+
+def room_row(c, p, org_id):
+    st = c.execute("SELECT * FROM room_state WHERE place_id=?", (p["id"],)).fetchone()
+    last = c.execute("SELECT ts, missing, guests FROM checks WHERE place_id=? ORDER BY id DESC LIMIT 1", (p["id"],)).fetchone()
+    return {"id": p["id"], "name": p["name"], "guests": st["guests"] if st else 0, "arrival": st["arrival"] if st else None, "departure": st["departure"] if st else None,
+            "language": st["language"] if st else None, "notes": st["notes"] if st else None, "last_check": dict(last) if last else None}
+
+@app.get("/api/rooms")
+def rooms(x_token: str = Header(default="")):
+    u = hotel(x_token)
+    with db() as c: return [room_row(c, p, u["org_id"]) for p in c.execute("SELECT * FROM places WHERE org_id=? AND kind='chambre' ORDER BY id", (u["org_id"],))]
+
+@app.get("/api/rooms/{pid}")
+def room(pid: int, x_token: str = Header(default="")):
+    u = hotel(x_token)
+    with db() as c:
+        p = c.execute("SELECT * FROM places WHERE id=? AND org_id=?", (pid, u["org_id"])).fetchone()
+        if not p: raise HTTPException(404)
+        r = room_row(c, p, u["org_id"])
+        r["items"] = expected_items(c, u["org_id"], r["guests"], r["language"])
+        r["history"] = [dict(h) | {"user": (c.execute("SELECT name FROM users WHERE id=?", (h["user_id"],)).fetchone() or {"name": ""})["name"]}
+                        for h in c.execute("SELECT id,ts,user_id,guests,missing,ticket_id FROM checks WHERE place_id=? ORDER BY id DESC LIMIT 8", (pid,))]
+    return r
+
+class StayIn(BaseModel): guests: int; arrival: str | None = None; departure: str | None = None; language: str | None = None; notes: str | None = None
+
+@app.put("/api/rooms/{pid}/stay")
+def set_stay(pid: int, b: StayIn, x_token: str = Header(default="")):
+    u = hotel(x_token)
+    if not 0 <= b.guests <= 20: raise HTTPException(400, "Nombre de personnes invalide")
+    with db() as c:
+        if not c.execute("SELECT 1 FROM places WHERE id=? AND org_id=? AND kind='chambre'", (pid, u["org_id"])).fetchone(): raise HTTPException(404)
+        c.execute("INSERT INTO room_state(place_id,org_id,guests,arrival,departure,language,notes,updated) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(place_id) DO UPDATE SET guests=excluded.guests, arrival=excluded.arrival, departure=excluded.departure, language=excluded.language, notes=excluded.notes, updated=excluded.updated",
+                  (pid, u["org_id"], b.guests, b.arrival or None, b.departure or None, b.language if b.language in LANGS else None, (b.notes or "")[:300], time.time()))
+    return {"ok": True}
+
+def analyze_photo(photo, items):
+    """Aide à la vérification : l'IA compte ce qu'elle voit nettement. Ne remplace jamais le contrôle humain."""
+    if not photo or not os.getenv("ANTHROPIC_API_KEY"): return None
+    try:
+        import anthropic
+        names = [i["name"] for i in items]
+        content = [{"type": "image", "source": {"type": "base64", "media_type": photo[1], "data": base64.b64encode(photo[0]).decode()}},
+                   {"type": "text", "text": f"Photo d'une chambre d'hôtel préparée pour des clients. Éléments attendus : {names}. Pour chacun, donne le nombre que tu vois CLAIREMENT sur la photo (entier), ou null si tu ne peux pas le savoir (caché, hors cadre, trop petit). N'invente rien. "
+                    'Réponds uniquement par un JSON : {"seen":[{"name":"...","count":0}],"note":"une phrase"}'}]
+        r = anthropic.Anthropic().messages.create(model=MODEL, max_tokens=500, messages=[{"role": "user", "content": content}])
+        j = json.loads(re.search(r"\{.*\}", "".join(b.text for b in r.content if b.type == "text"), re.S).group(0))
+        return {"seen": [{"name": str(x.get("name")), "count": x.get("count") if isinstance(x.get("count"), int) else None} for x in j.get("seen", [])][:30], "note": str(j.get("note", ""))[:300]}
+    except Exception:
+        return None
+
+@app.post("/api/rooms/{pid}/check")
+async def check_room(pid: int, answers: str = Form(...), photo: UploadFile = File(None), x_token: str = Header(default="")):
+    u = hotel(x_token)
+    try: ans = {int(a["id"]): max(0, float(a["found"])) for a in json.loads(answers)}
+    except Exception: raise HTTPException(400, "Réponses invalides")
+    pname, pdata = await save_upload(photo, ["image/"])
+    with db() as c:
+        p = c.execute("SELECT * FROM places WHERE id=? AND org_id=? AND kind='chambre'", (pid, u["org_id"])).fetchone()
+        if not p: raise HTTPException(404)
+        r = room_row(c, p, u["org_id"]); items = expected_items(c, u["org_id"], r["guests"], r["language"])
+        if r["guests"] < 1: raise HTTPException(400, "Indiquez d'abord le nombre de personnes")
+        rows, missing = [], []
+        for it in items:
+            if it["id"] not in ans: raise HTTPException(400, "Réponse manquante")
+            f = ans[it["id"]]; rows.append({"id": it["id"], "name": it["name"], "expected": it["expected"], "found": f})
+            if f < it["expected"]: missing.append((it, it["expected"] - f))
+    ai = analyze_photo(pdata, items)
+    now = time.time(); tid = None
+    with db() as c:
+        if missing:
+            lst = ", ".join(f"{int(q) if q == int(q) else q} × {it['name']}" for it, q in missing)
+            d = days_until(r["arrival"]) if r["arrival"] else None
+            urg = "haute" if (d is not None and d <= 0) or (r["guests"] and not r["arrival"]) else "normale"
+            cat = "literie/linge" if missing[0][0]["category"] == "linge" else "ménage"
+            desc = "\n".join(f"{x['name']} : {x['found']:g} / {x['expected']}" for x in rows if x["found"] < x["expected"]) + f"\n({r['guests']} personne(s))"
+            tid = c.execute("""INSERT INTO tickets(org_id,place_id,title,description,category,urgency,created,due,reporter_id,photo,ai_note)
+                               VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (u["org_id"], pid, f"Manque : {lst}", desc, cat, urg, now, now + SLA_H[urg] * 3600, u["id"], pname, "contrôle de chambre")).lastrowid
+            c.execute("INSERT INTO events(ticket_id,ts,user_id,text) VALUES(?,?,?,?)", (tid, now, u["id"], f"Créé ({urg}, {cat})"))
+        cid = c.execute("INSERT INTO checks(org_id,place_id,user_id,ts,guests,answers,missing,photo,ai,ticket_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (u["org_id"], pid, u["id"], now, r["guests"], json.dumps(rows, ensure_ascii=False), len(missing), pname, json.dumps(ai, ensure_ascii=False) if ai else None, tid)).lastrowid
+    flags = []
+    if ai:
+        exp = {i["name"]: i["expected"] for i in items}
+        flags = [x["name"] for x in ai["seen"] if x["count"] is not None and x["name"] in exp and x["count"] < exp[x["name"]]]
+    return {"id": cid, "ok": not missing, "missing": [{"name": it["name"], "qty": q} for it, q in missing], "ticket_id": tid, "ai": ai, "ai_flags": flags}
+
 # ---------- tableau de bord hôtel ----------
+def checks_summary(org_id, now):
+    with db() as c: rows = c.execute("SELECT missing, answers FROM checks WHERE org_id=? AND ts>?", (org_id, now - 30 * 86400)).fetchall()
+    miss = {}
+    for r in rows:
+        for a in json.loads(r["answers"]):
+            if a["found"] < a["expected"]: miss[a["name"]] = miss.get(a["name"], 0) + (a["expected"] - a["found"])
+    return {"total": len(rows), "ok_pct": round(100 * sum(1 for r in rows if r["missing"] == 0) / len(rows)) if rows else None,
+            "top_missing": sorted(([k, v] for k, v in miss.items()), key=lambda x: -x[1])[:5]}
+
 @app.get("/api/dashboard")
 def dashboard(x_token: str = Header(default="")):
     u = hotel(x_token, "responsable"); now = time.time()
@@ -549,7 +693,7 @@ def dashboard(x_token: str = Header(default="")):
     top = lambda d, n=5: sorted(d.items(), key=lambda x: -x[1])[:n]
     return {"open": len(open_), "overdue": len(overdue), "avg_resolution_h": avg_h, "sla_ok_pct": sla_ok, "blocked": blocked, "blocked_loss_now": sum(b["loss_mad"] for b in blocked),
             "blocked_loss_30d_resolved": lost_res, "top_places": top(byplace), "by_category": top(bycat, 8), "load": top(load, 8), "adr": adr,
-            "provider_missions": ms["n"], "provider_spend": ms["s"]}
+            "provider_missions": ms["n"], "provider_spend": ms["s"], "checks": checks_summary(u["org_id"], now)}
 
 @app.post("/api/demo-data")
 def demo(x_token: str = Header(default="")):
@@ -566,7 +710,7 @@ def demo(x_token: str = Header(default="")):
     return {"ok": True}
 
 @app.get("/api/config")
-def config(): return {"trades": TRADES, "commission": COMMISSION}
+def config(): return {"trades": TRADES, "commission": COMMISSION, "ai": bool(os.getenv("ANTHROPIC_API_KEY")), "langs": LANGS}
 
 app.mount("/uploads", StaticFiles(directory=UP), name="uploads")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
