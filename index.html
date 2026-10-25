@@ -1,0 +1,160 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Opérations Hôtels</title><meta name="theme-color" content="#1B2A4A">
+<style>
+:root{--navy:#1B2A4A;--gold:#C17817;--bg:#F6F4EF;--card:#fff;--ink:#222;--mut:#6b6b6b;--line:#e4e0d6;--red:#B23A3A;--green:#2E7D4F}
+*{box-sizing:border-box}body{margin:0;font:16px/1.4 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink);padding-bottom:74px}
+header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0;flex:1}header small{opacity:.7;font-weight:400}header button{background:none;border:1px solid #ffffff55;color:#fff;border-radius:6px;padding:4px 10px;font:inherit;font-size:13px;position:relative}
+.badge{position:absolute;top:-7px;right:-7px;background:var(--red);color:#fff;border-radius:10px;font-size:11px;padding:0 6px}
+main{max-width:720px;margin:0 auto;padding:12px}
+nav.tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;z-index:5;padding-bottom:env(safe-area-inset-bottom)}
+nav.tabs a{flex:1;text-align:center;padding:10px 2px;color:var(--mut);text-decoration:none;font-size:12.5px}nav.tabs a.on{color:var(--navy);font-weight:600;border-top:2px solid var(--gold)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.t{display:block;text-decoration:none;color:inherit}.top{display:flex;gap:8px;align-items:center;margin-bottom:4px}.top b{flex:1}
+.pill{font-size:12px;padding:2px 8px;border-radius:10px;background:#eee;white-space:nowrap}
+.urgent{background:#f8d7d7;color:#8a1f1f}.haute{background:#fbefd7;color:#8a5a0f}.normale{background:#e3ecf8;color:#24497d}.basse{background:#eee;color:#555}.ok{background:#dcefdc;color:#1f6b2a}
+.late{color:var(--red);font-weight:600}.mut{color:var(--mut);font-size:13px}
+.seg{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto}.seg a{flex:1;text-align:center;padding:8px;border-radius:8px;background:#fff;border:1px solid var(--line);text-decoration:none;color:var(--ink);font-size:14px;white-space:nowrap}.seg a.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}input,select,textarea{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff}textarea{min-height:80px}
+.btn{display:block;width:100%;background:var(--gold);color:#fff;border:0;border-radius:10px;padding:13px;font:inherit;font-weight:600;margin-top:14px;cursor:pointer}.btn.s{background:#fff;color:var(--navy);border:1px solid var(--navy)}.btn.g{background:var(--green)}.btn.r{background:var(--red)}.btn.sm{padding:8px;margin-top:6px;font-size:14px}
+.row{display:flex;gap:8px}.row>*{flex:1}.k{display:grid;grid-template-columns:1fr 1fr;gap:10px}.k div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}.k b{font-size:26px;display:block;color:var(--navy)}
+.k .r b{color:var(--red)}img.ph{width:100%;border-radius:10px;margin:8px 0}audio{width:100%}.bar{height:8px;background:var(--gold);border-radius:4px;margin-top:3px}
+.ev{font-size:13px;color:var(--mut);border-left:2px solid var(--line);padding-left:8px;margin:4px 0}.qr{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.qr .card{text-align:center;break-inside:avoid}.qr img{width:100%}
+@media print{header,nav.tabs,.noprint{display:none!important}body{background:#fff}}
+.auth{max-width:420px;margin:6vh auto;padding:0 14px}.auth h2{color:var(--navy);margin-bottom:2px}
+.chk{display:flex;gap:8px;align-items:center;margin-top:10px}.chk input{width:auto}.chips{display:flex;flex-wrap:wrap;gap:6px}.chips label{display:flex;gap:4px;align-items:center;margin:0;color:var(--ink);background:#fff;border:1px solid var(--line);padding:6px 10px;border-radius:16px}.chips input{width:auto}
+.mis{border-left:4px solid var(--gold)}.notif{padding:8px 0;border-bottom:1px solid var(--line);display:block;color:inherit;text-decoration:none}.notif.u{font-weight:600}
+</style></head><body><div id="app"></div>
+<script>
+const S={token:localStorage.getItem('tk')||'',me:null,cfg:null,unread:0};
+const $=(s,e=document)=>e.querySelector(s);const esc=s=>(s??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(u,o={}){o.headers={...(o.headers||{}),'x-token':S.token};const r=await fetch(u,o);if(r.status==401&&!u.startsWith('/api/login')&&!u.startsWith('/api/signup')){logout();throw 0}
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:'Erreur');return j}
+const J=(m,b)=>({method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+function logout(){localStorage.removeItem('tk');S.token='';S.me=null;location.hash='';render()}
+const isHotel=()=>['agent','responsable','patron'].includes(S.me.role),boss=()=>['responsable','patron'].includes(S.me.role);
+function fmt(h){return h<1?Math.round(h*60)+' min':h<48?Math.round(h)+' h':Math.round(h/24)+' j'}
+function dueTxt(t){if(t.status=='resolu')return'Résolu';const h=(t.due*1000-Date.now())/36e5;return h<0?`<span class="late">En retard de ${fmt(-h)}</span>`:`Reste ${fmt(h)}`}
+const L={nouveau:'Nouveau',en_cours:'En cours',resolu:'Résolu'};const mad=n=>Math.round(n||0).toLocaleString('fr-FR')+' MAD';
+const MS={ouverte:'Publiée',acceptee:'Acceptée',terminee:'Terminée — à confirmer',confirmee:'Confirmée',litige:'Litige',annulee:'Annulée'};
+function nav(items,cur){return`<nav class="tabs">${items.map(([h,l])=>`<a href="#${h}" class="${cur==h?'on':''}">${l}</a>`).join('')}</nav>`}
+function shell(inner,cur){const m=S.me;let items;
+ if(isHotel())items=[['/','Tickets'],['/new','＋ Signaler'],...(boss()?[['/dash','Bord'],['/places','QR']]:[]),...(m.role=='patron'?[['/team','Réglages']]:[])];
+ else if(m.role=='prestataire')items=[['/pmissions','Missions'],['/pmine','Mes interventions'],['/pprofile','Profil']];
+ else items=[['/admin','Prestataires'],['/adm-com','Commissions'],['/adm-org','Hôtels']];
+ return`<header><h1>${esc(m.org?m.org.name:m.role=='admin'?'Administration':m.name)}<br><small>${esc(m.name)}</small></h1><button onclick="location.hash='/notifs'">🔔${S.unread?`<span class="badge">${S.unread}</span>`:''}</button><button onclick="logout()">Quitter</button></header><main>${inner}</main>${nav(items,cur)}`}
+function home(){return isHotel()?'/':S.me.role=='prestataire'?'/pmissions':'/admin'}
+async function render(){const A=$('#app');
+ if(!S.token){return authPage(A)}
+ if(!S.me){try{S.me=await api('/api/me');S.cfg=await fetch('/api/config').then(r=>r.json())}catch(e){return}}
+ api('/api/notifications').then(n=>{if(n.unread!=S.unread){S.unread=n.unread;const b=$('header button .badge');if(!b||(+b.textContent)!=S.unread)softHead()}}).catch(()=>{});
+ const h=location.hash.replace('#','')||home();const [path,qs]=h.split('?');const q=new URLSearchParams(qs||'');
+ try{const R=ROUTES[path]||(path.startsWith('/t/')?()=>detail(A,path.split('/')[2]):null);
+  if(!R){location.hash=home();return}
+  if(path=='/notifs')return notifPage(A);
+  return await R(A,q)}catch(e){if(e)A.innerHTML=shell(`<div class="card">${esc(e.message)}</div>`)}}
+function softHead(){const b=$('header button');if(b)b.innerHTML='🔔'+(S.unread?`<span class="badge">${S.unread}</span>`:'')}
+setInterval(()=>{if(S.token&&S.me)api('/api/notifications').then(n=>{S.unread=n.unread;softHead()}).catch(()=>{})},20000);
+// ---------- auth ----------
+function authPage(A,mode='login',msg=''){const tabs=[['login','Connexion'],['hotel','Créer mon hôtel'],['prov','Je suis prestataire']];
+ const T=`<div class="seg">${tabs.map(([k,l])=>`<a href="javascript:authPage($('#app'),'${k}')" class="${mode==k?'on':''}">${l}</a>`).join('')}</div>`;let f='';
+ if(mode=='login')f=`<label>Email</label><input id="em" type="email" autocomplete="username"><label>Mot de passe</label><input id="pw" type="password" autocomplete="current-password"><button class="btn" onclick="doLogin()">Se connecter</button>`;
+ if(mode=='hotel')f=`<label>Nom de l'hôtel</label><input id="hn"><label>Ville</label><input id="ci" placeholder="Marrakech"><label>Adresse (visible des prestataires après acceptation)</label><input id="ad"><label>Téléphone de l'hôtel</label><input id="ph" type="tel"><label>Votre nom</label><input id="nm"><label>Email</label><input id="em" type="email"><label>Mot de passe (8 caractères min)</label><input id="pw" type="password"><button class="btn" onclick="doSignH()">Créer mon espace</button>`;
+ if(mode=='prov')f=`<label>Nom</label><input id="nm"><label>Entreprise (facultatif)</label><input id="co"><label>Téléphone / WhatsApp</label><input id="ph" type="tel"><label>Ville d'intervention</label><input id="ci" placeholder="Marrakech"><label>Métiers</label><div class="chips">${(S.cfg?.trades||TR).map(t=>`<label><input type="checkbox" value="${t}">${t}</label>`).join('')}</div><label>Email</label><input id="em" type="email"><label>Mot de passe (8 caractères min)</label><input id="pw" type="password"><button class="btn" onclick="doSignP()">Créer mon compte</button><p class="mut">Votre compte est validé par l'équipe avant de recevoir des missions.</p>`;
+ A.innerHTML=`<div class="auth"><h2>Opérations Hôtels</h2><p class="mut">Pannes, interventions, prestataires.</p>${T}<div class="card">${f}<p class="mut" id="err" style="color:var(--red)">${esc(msg)}</p></div></div>`}
+const TR=["plomberie","électricité","climatisation","serrurerie","menuiserie","peinture","nettoyage","piscine/jardin","autre"];
+async function authDone(r){S.token=r.token;localStorage.setItem('tk',r.token);S.me=null;location.hash='';render()}
+const err=e=>{$('#err').textContent=e.message};
+async function doLogin(){try{authDone(await api('/api/login',J('POST',{email:$('#em').value,password:$('#pw').value})))}catch(e){err(e)}}
+async function doSignH(){try{authDone(await api('/api/signup-hotel',J('POST',{hotel_name:$('#hn').value,city:$('#ci').value,address:$('#ad').value,phone:$('#ph').value,name:$('#nm').value,email:$('#em').value,password:$('#pw').value})))}catch(e){err(e)}}
+async function doSignP(){try{authDone(await api('/api/signup-provider',J('POST',{name:$('#nm').value,company:$('#co').value,phone:$('#ph').value,city:$('#ci').value,trades:[...document.querySelectorAll('.chips input:checked')].map(x=>x.value),email:$('#em').value,password:$('#pw').value})))}catch(e){err(e)}}
+fetch('/api/config').then(r=>r.json()).then(c=>S.cfg=c);
+// ---------- notifications ----------
+async function notifPage(A){const n=await api('/api/notifications');await api('/api/notifications/read',{method:'POST'});S.unread=0;
+ A.innerHTML=shell(`<div class="card"><b>Notifications</b>${n.items.map(i=>`<a class="notif ${i.read?'':'u'}" href="${i.link||'#'}">${esc(i.text)}<div class="mut">${new Date(i.ts*1000).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'})}</div></a>`).join('')||'<p class="mut">Rien pour le moment.</p>'}</div>`,'')}
+// ---------- hôtel ----------
+async function list(A,q){const s=q.get('s')||'';const T=await api('/api/tickets'+(s?'?status='+s:''));
+ const seg=[['','Tous'],['nouveau','Nouveau'],['en_cours','En cours'],['resolu','Résolu']].map(([v,l])=>`<a href="#/?s=${v}" class="${s==v?'on':''}">${l}</a>`).join('');
+ A.innerHTML=shell(`<div class="seg">${seg}</div>`+(T.length?T.map(t=>`<a class="card t" href="#/t/${t.id}"><div class="top"><b>${esc(t.place)}${t.blocked?' 🔒':''}</b><span class="pill ${t.urgency}">${t.urgency}</span></div><div>${esc(t.title)}</div><div class="mut">${L[t.status]} · ${esc(t.category)} · ${dueTxt(t)}${t.assignee?' · '+esc(t.assignee):''}</div></a>`).join(''):'<p class="mut">Aucun ticket. Utilisez « Signaler » pour en créer un.</p>'),'/')}
+async function newT(A,q){const place=q.get('place');const P=await api('/api/places');
+ A.innerHTML=shell(`<div class="card"><label>Lieu</label><select id="pl">${P.map(p=>`<option value="${p.id}" ${p.id==place?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+ <label>Que se passe-t-il ?</label><input id="ti" placeholder="Ex : fuite sous le lavabo"><label>Détails (facultatif)</label><textarea id="de"></textarea>
+ <label>Photo</label><input id="ph" type="file" accept="image/*" capture="environment">
+ <label>Message vocal</label><div class="row"><button class="btn s" id="rec" style="margin:0" onclick="rec()">🎙 Enregistrer</button><span class="mut" id="recs" style="align-self:center">aucun</span></div>
+ <label>Urgence</label><select id="ur"><option value="auto">Automatique (l'IA décide)</option><option value="urgent">Urgent</option><option value="haute">Haute</option><option value="normale">Normale</option><option value="basse">Basse</option></select>
+ <div class="chk"><input type="checkbox" id="bl" onchange="$('#na').style.display=this.checked?'block':'none'"><label style="margin:0;color:var(--ink)">🔒 Chambre bloquée (inutilisable)</label></div>
+ <div id="na" style="display:none"><label>Prochaine arrivée prévue</label><input type="date" id="nad"></div><button class="btn" id="go" onclick="send()">Envoyer</button><p class="mut" id="msg"></p></div>`,'/new')}
+let MR,chunks=[],audioBlob=null;
+async function rec(){const b=$('#rec');if(MR&&MR.state=='recording'){MR.stop();return}
+ try{const st=await navigator.mediaDevices.getUserMedia({audio:true});MR=new MediaRecorder(st);chunks=[];MR.ondataavailable=e=>chunks.push(e.data);
+ MR.onstop=()=>{audioBlob=new Blob(chunks,{type:MR.mimeType||'audio/webm'});st.getTracks().forEach(t=>t.stop());b.textContent='🎙 Réenregistrer';$('#recs').textContent='✓ enregistré'};
+ MR.start();b.textContent='⏹ Arrêter';$('#recs').textContent='enregistrement…'}catch(e){$('#recs').textContent='micro indisponible (HTTPS requis)'}}
+async function send(){const ti=$('#ti').value.trim();if(!ti){$('#msg').textContent='Décrivez le problème en quelques mots.';return}
+ const f=new FormData();f.append('place_id',$('#pl').value);f.append('title',ti);f.append('description',$('#de').value);f.append('urgency',$('#ur').value);f.append('blocked',$('#bl').checked?1:0);f.append('next_arrival',$('#nad')?.value||'');
+ if($('#ph').files[0])f.append('photo',$('#ph').files[0]);if(audioBlob)f.append('audio',audioBlob,'v.webm');audioBlob=null;
+ $('#go').disabled=true;try{const r=await api('/api/tickets',{method:'POST',body:f});location.hash='/t/'+r.id}catch(e){$('#msg').textContent=e.message;$('#go').disabled=false}}
+async function detail(A,id){const t=await api('/api/tickets/'+id),b=boss(),mine=t.assignee_id==S.me.id,m=t.mission;const staff=b?await api('/api/staff'):[];
+ const mis=m?`<div class="card mis"><b>🔧 Prestataire — ${MS[m.status]}</b><p class="mut">${esc(m.trade)}${m.budget_mad?' · budget '+mad(m.budget_mad):''}${m.note?'<br>'+esc(m.note):''}</p>
+  ${m.provider?`<p><b>${esc(m.provider)}</b>${m.provider_rating?` ⭐ ${m.provider_rating} (${m.provider_rating_n})`:''}<br><a href="tel:${esc(m.provider_phone)}">📞 ${esc(m.provider_phone)}</a></p>`:'<p class="mut">En attente d\'un prestataire de votre ville…</p>'}
+  ${m.status=='terminee'?`<p>Montant déclaré, payé sur place : <b>${mad(m.final_price)}</b></p>${m.done_note?`<p class="mut">${esc(m.done_note)}</p>`:''}${m.done_photo?`<img class="ph" src="/uploads/${m.done_photo}">`:''}<label>Note du prestataire (1-5)</label><select id="rt"><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select><label>Commentaire</label><input id="rc"><button class="btn g" onclick="conf(${m.id},true)">✓ Travail fait, montant correct</button><button class="btn s sm" onclick="conf(${m.id},false)">Contester le montant</button>`:''}
+  ${['ouverte','acceptee'].includes(m.status)?`<div class="row"><button class="btn s sm" onclick="mis(${m.id},'release')">${m.status=='acceptee'?'Remplacer le prestataire':'Republier'}</button><button class="btn s sm" onclick="mis(${m.id},'cancel')">Annuler</button></div>`:''}</div>`:'';
+ const call=b&&t.status!='resolu'&&(!m||['annulee'].includes(m.status))?`<div class="card"><b>Appeler un prestataire</b><label>Métier</label><select id="tr">${S.cfg.trades.map(x=>`<option ${x==t.default_trade?'selected':''}>${x}</option>`).join('')}</select><label>Budget indicatif (MAD, facultatif)</label><input id="bu" type="number"><label>Précisions</label><input id="no"><button class="btn" onclick="callP(${id})">Publier la mission</button><p class="mut">Les prestataires validés de votre ville sont notifiés ; le premier à accepter prend la mission. Paiement sur place.</p></div>`:'';
+ A.innerHTML=shell(`<a href="#/" class="mut">← Retour</a><div class="card"><div class="top"><b>${esc(t.place)}${t.blocked?' 🔒':''}</b><span class="pill ${t.urgency}">${t.urgency}</span></div>
+ <h3 style="margin:6px 0">${esc(t.title)}</h3><p>${esc(t.description)}</p>${t.photo?`<img class="ph" src="/uploads/${t.photo}">`:''}${t.audio?`<audio controls src="/uploads/${t.audio}"></audio>`:''}
+ <p class="mut">${L[t.status]} · ${esc(t.category)} · ${dueTxt(t)}<br>Signalé par ${esc(t.reporter)}${t.next_arrival?'<br>Prochaine arrivée : '+esc(t.next_arrival):''}${t.ai_note?'<br>'+esc(t.ai_note):''}</p>
+ ${b?`<label>Assigner à (équipe)</label><select onchange="up(${id},{assignee_id:+this.value})"><option value="0">—</option>${staff.map(s=>`<option value="${s.id}" ${s.id==t.assignee_id?'selected':''}>${esc(s.name)}</option>`).join('')}</select><label>Urgence</label><select onchange="up(${id},{urgency:this.value})">${['urgent','haute','normale','basse'].map(u=>`<option ${u==t.urgency?'selected':''}>${u}</option>`).join('')}</select>`:''}
+ ${t.status=='nouveau'?`<button class="btn s" onclick="up(${id},{status:'en_cours'})">Je m'en occupe</button>`:''}
+ ${t.status!='resolu'&&(b||mine)?`<button class="btn g" onclick="up(${id},{status:'resolu'})">✓ Marquer résolu</button>`:''}
+ ${t.status=='resolu'&&b?`<button class="btn s" onclick="up(${id},{status:'nouveau'})">Rouvrir</button>`:''}
+ <label>Ajouter un commentaire</label><div class="row"><input id="cm"><button class="btn s" style="margin:0;flex:0 0 90px" onclick="up(${id},{comment:$('#cm').value})">Ok</button></div></div>${mis}${call}
+ <div class="card"><b>Historique</b>${t.events.map(e=>`<div class="ev">${new Date(e.ts*1000).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'})} · ${esc(e.user)}<br>${esc(e.text)}</div>`).join('')}</div>`,'/')}
+async function up(id,b){try{await api('/api/tickets/'+id,J('PATCH',b));render()}catch(e){alert(e.message)}}
+async function callP(id){try{const r=await api(`/api/tickets/${id}/mission`,J('POST',{trade:$('#tr').value,budget_mad:+$('#bu').value||null,note:$('#no').value}));alert(r.notified?`${r.notified} prestataire(s) notifié(s).`:'Aucun prestataire validé dans votre ville pour ce métier pour l\'instant. La mission reste publiée.');render()}catch(e){alert(e.message)}}
+async function mis(id,a){try{await api(`/api/missions/${id}/${a}`,{method:'POST'});render()}catch(e){alert(e.message)}}
+async function conf(id,ok){try{await api(`/api/missions/${id}/confirm`,J('POST',{price_ok:ok,rating:ok?+$('#rt').value:null,comment:$('#rc').value}));render()}catch(e){alert(e.message)}}
+async function dash(A){const d=await api('/api/dashboard');const mx=Math.max(1,...d.by_category.map(x=>x[1]));
+ A.innerHTML=shell(`<div class="k"><div><b>${d.open}</b>tickets ouverts</div><div class="${d.overdue?'r':''}"><b>${d.overdue}</b>en retard (SLA)</div><div><b>${d.avg_resolution_h??'–'}${d.avg_resolution_h?' h':''}</b>délai moyen (30 j)</div><div><b>${d.sla_ok_pct??'–'}${d.sla_ok_pct!=null?' %':''}</b>résolus dans les délais</div></div>
+ <div class="card" style="margin-top:10px"><b>🔒 Chambres bloquées</b><p class="mut">Perte estimée : ${mad(d.adr)} / nuit (modifiable dans Réglages).</p>
+ ${d.blocked.length?d.blocked.map(b=>`<a class="t" href="#/t/${b.id}"><div style="display:flex"><b style="flex:1">${esc(b.place)} — ${esc(b.title)}</b><span class="late">${mad(b.loss_mad)}</span></div><div class="mut">bloquée depuis ${fmt(b.hours)}${b.next_arrival?' · arrivée '+esc(b.next_arrival):''}</div></a><hr style="border:0;border-top:1px solid var(--line)">`).join('')+`<b>Total en cours : <span class="late">${mad(d.blocked_loss_now)}</span></b>`:'<p>Aucune chambre bloquée 👍</p>'}<p class="mut">Résolues sur 30 j : ${mad(d.blocked_loss_30d_resolved)}</p></div>
+ <div class="card"><b>Prestataires</b><p>${d.provider_missions} intervention(s) confirmée(s) · ${mad(d.provider_spend)} payés sur place</p></div>
+ <div class="card"><b>Pannes par type (90 j)</b>${d.by_category.map(([k,v])=>`<div style="margin-top:6px">${esc(k)} <span class="mut">${v}</span><div class="bar" style="width:${v/mx*100}%"></div></div>`).join('')||'<p class="mut">Pas encore de données.</p>'}</div>
+ <div class="card"><b>Lieux les plus touchés (90 j)</b>${d.top_places.map(([k,v])=>`<div>${esc(k)} — ${v}</div>`).join('')||'<p class="mut">–</p>'}</div>
+ <div class="card"><b>Charge par personne</b>${d.load.map(([k,v])=>`<div>${esc(k)} — ${v}</div>`).join('')||'<p class="mut">–</p>'}</div>
+ ${S.me.role=='patron'?`<button class="btn s" onclick="demo()">Remplir avec des données de démo</button>`:''}`,'/dash')}
+async function demo(){await api('/api/demo-data',{method:'POST'});render()}
+async function places(A){const P=await api('/api/places');
+ A.innerHTML=shell(`<div class="card noprint"><b>Ajouter un lieu</b><div class="row"><input id="pn" placeholder="Ex : Chambre 201"><select id="pk"><option>chambre</option><option>commun</option><option>technique</option></select></div><button class="btn s" onclick="addP()">Ajouter</button><button class="btn" onclick="window.print()">🖨 Imprimer les QR codes</button><p class="mut">Un QR par chambre : le personnel scanne, le lieu est choisi, il décrit le problème en 10 secondes.</p></div><div class="qr">${P.map(p=>`<div class="card"><img src="/api/places/${p.id}/qr.svg"><b>${esc(p.name)}</b></div>`).join('')}</div>`,'/places')}
+async function addP(){const n=$('#pn').value.trim();if(!n)return;await api('/api/places',J('POST',{name:n,kind:$('#pk').value}));render()}
+async function team(A){const [st,me]=await Promise.all([api('/api/staff'),api('/api/me')]);const o=me.org;
+ A.innerHTML=shell(`<div class="card"><b>Réglages de l'hôtel</b><label>Nom</label><input id="on" value="${esc(o.name)}"><label>Ville</label><input id="oc" value="${esc(o.city)}"><label>Adresse</label><input id="oa" value="${esc(o.address)}"><label>Téléphone</label><input id="op" value="${esc(o.phone)}"><label>Prix moyen d'une nuit (MAD) — sert au calcul des pertes</label><input id="od" type="number" value="${o.adr}"><button class="btn" onclick="saveOrg()">Enregistrer</button></div>
+ <div class="card"><b>Équipe</b>${st.map(s=>`<div>${esc(s.name)} <span class="mut">${esc(s.role)} · ${esc(s.email)}</span></div>`).join('')}<hr><label>Nom</label><input id="sn"><label>Email</label><input id="se" type="email"><label>Rôle</label><select id="sr"><option value="agent">agent (signale)</option><option value="responsable">responsable (assigne, appelle les prestataires)</option><option value="patron">patron</option></select><label>Mot de passe initial (8 caractères min)</label><input id="sp"><button class="btn s" onclick="addS()">Ajouter à l'équipe</button><p class="mut" id="se2"></p></div>`,'/team')}
+async function saveOrg(){await api('/api/org',J('PATCH',{name:$('#on').value,city:$('#oc').value,address:$('#oa').value,phone:$('#op').value,adr:+$('#od').value}));S.me=null;render()}
+async function addS(){try{await api('/api/staff',J('POST',{name:$('#sn').value,email:$('#se').value,role:$('#sr').value,password:$('#sp').value}));render()}catch(e){$('#se2').textContent=e.message}}
+// ---------- prestataire ----------
+function pending(){return S.me.status!='valide'?`<div class="card"><b>⏳ Compte ${S.me.status=='suspendu'?'suspendu':'en attente de validation'}</b><p class="mut">${S.me.status=='suspendu'?'Contactez-nous.':'Nous vérifions votre profil. Vous recevrez une notification dès la validation.'}</p></div>`:''}
+async function pmissions(A){S.me=await api('/api/me');const M=await api('/api/provider/missions?scope=open');
+ A.innerHTML=shell(pending()+(M.length?M.map(m=>`<div class="card mis"><div class="top"><b>${esc(m.trade)} · ${esc(m.city)}</b><span class="pill ${m.urgency}">${m.urgency}</span></div><div><b>${esc(m.title)}</b></div><div class="mut">${esc(m.description)}${m.note?'<br>'+esc(m.note):''}${m.budget_mad?'<br>Budget indicatif : '+mad(m.budget_mad):''}</div>${m.photo?`<img class="ph" src="/uploads/${m.photo}">`:''}${m.audio?`<audio controls src="/uploads/${m.audio}"></audio>`:''}<button class="btn g" onclick="acc(${m.id})">J'accepte la mission</button><p class="mut">Le nom et l'adresse de l'hôtel s'affichent après acceptation.</p></div>`).join(''):(S.me.status=='valide'?'<p class="mut">Aucune mission disponible pour le moment. Vous serez notifié.</p>':'')),'/pmissions')}
+async function acc(id){try{await api(`/api/missions/${id}/accept`,{method:'POST'});location.hash='/pmine'}catch(e){alert(e.message);render()}}
+async function pmine(A){const M=await api('/api/provider/missions?scope=mine');
+ A.innerHTML=shell(M.length?M.map(m=>`<div class="card mis"><div class="top"><b>${esc(m.hotel)} — ${esc(m.place)}</b><span class="pill ${m.status=='confirmee'?'ok':'normale'}">${MS[m.status]}</span></div><div><b>${esc(m.title)}</b> · ${esc(m.trade)}</div><div class="mut">${esc(m.description)}${m.note?'<br>'+esc(m.note):''}<br>📍 ${esc(m.address)}, ${esc(m.city)}<br><a href="tel:${esc(m.hotel_phone)}">📞 ${esc(m.hotel_phone)}</a></div>${m.photo?`<img class="ph" src="/uploads/${m.photo}">`:''}
+ ${m.status=='acceptee'?`<label>Montant facturé et encaissé sur place (MAD)</label><input id="fp${m.id}" type="number"><label>Compte rendu</label><input id="dn${m.id}"><label>Photo après intervention</label><input id="dp${m.id}" type="file" accept="image/*" capture="environment"><button class="btn g" onclick="fin(${m.id})">Intervention terminée</button><button class="btn s sm" onclick="wd(${m.id})">Je me désiste</button>`:''}
+ ${m.final_price!=null?`<p class="mut">Montant déclaré : ${mad(m.final_price)}${m.status=='confirmee'?` · commission plateforme : ${mad(m.commission)}`:''}</p>`:''}</div>`).join(''):'<p class="mut">Aucune intervention pour le moment.</p>','/pmine')}
+async function fin(id){const v=$('#fp'+id).value;if(!v){alert('Indiquez le montant encaissé.');return}const f=new FormData();f.append('final_price',v);f.append('note',$('#dn'+id).value);if($('#dp'+id).files[0])f.append('photo',$('#dp'+id).files[0]);try{await api(`/api/missions/${id}/done`,{method:'POST',body:f});render()}catch(e){alert(e.message)}}
+async function wd(id){if(confirm('Vous désister ?')){await api(`/api/missions/${id}/withdraw`,{method:'POST'});render()}}
+async function pprofile(A){const [s,me]=await Promise.all([api('/api/provider/stats'),api('/api/me')]);
+ A.innerHTML=shell(pending()+`<div class="k"><div><b>${s.done}</b>interventions</div><div><b>${s.rating??'–'}</b>note moyenne</div><div><b>${mad(s.revenue)}</b>encaissé</div><div class="${s.commission_due?'r':''}"><b>${mad(s.commission_due)}</b>commission à régler</div></div>
+ <div class="card" style="margin-top:10px"><b>${esc(me.name)}</b><div class="mut">${esc(me.company)}<br>${esc(me.city)} · ${esc((me.trades||'').split(',').join(', '))}<br>${esc(me.phone)}</div><p class="mut">Vous encaissez directement chez l'hôtel. La plateforme prélève ${Math.round(s.rate*100)} % du montant de chaque intervention confirmée ; elle vous la réclame périodiquement.</p></div>`,'/pprofile')}
+// ---------- admin ----------
+async function adm(A){const d=await api('/api/admin/overview');
+ A.innerHTML=shell(`<div class="card"><b>Prestataires (${d.providers.length})</b>${d.providers.map(p=>`<div style="margin:10px 0;padding-bottom:8px;border-bottom:1px solid var(--line)"><b>${esc(p.name)}</b> <span class="pill ${p.status=='valide'?'ok':'haute'}">${p.status}</span><div class="mut">${esc(p.company)} · ${esc(p.city)} · ${esc(p.trades)}<br>${esc(p.phone)} · ${esc(p.email)}</div><div class="row">${p.status!='valide'?`<button class="btn sm g" onclick="pst(${p.id},'valide')">Valider</button>`:''}${p.status!='suspendu'?`<button class="btn sm s" onclick="pst(${p.id},'suspendu')">Suspendre</button>`:''}</div></div>`).join('')||'<p class="mut">Aucun.</p>'}</div>`,'/admin')}
+async function pst(id,s){await api('/api/admin/providers/'+id,J('POST',{status:s}));render()}
+async function admcom(A){const d=await api('/api/admin/overview');
+ A.innerHTML=shell(`<div class="k"><div class="r"><b>${mad(d.commission_due)}</b>commissions à encaisser</div><div><b>${Math.round(d.rate*100)} %</b>taux</div></div><div class="card" style="margin-top:10px"><b>Interventions confirmées / litiges</b>${d.ledger.map(l=>`<div style="margin:8px 0;border-bottom:1px solid var(--line);padding-bottom:6px">#${l.id} ${esc(l.hotel)} ← ${esc(l.provider)}<div class="mut">${mad(l.final_price)} · commission ${mad(l.commission)} · ${l.status}${l.commission_paid?' · ✓ réglée':''}</div>
+ ${l.status=='confirmee'&&!l.commission_paid?`<button class="btn sm s" onclick="paid(${l.id})">Marquer réglée</button>`:''}${l.status=='litige'?`<div class="row"><button class="btn sm g" onclick="arb(${l.id},true)">Valider le montant</button><button class="btn sm r" onclick="arb(${l.id},false)">Annuler</button></div>`:''}</div>`).join('')||'<p class="mut">Rien.</p>'}</div>`,'/adm-com')}
+async function paid(id){await api(`/api/admin/missions/${id}/paid`,{method:'POST'});render()}
+async function arb(id,ok){await api(`/api/admin/missions/${id}/resolve`,J('POST',{price_ok:ok}));render()}
+async function admorg(A){const d=await api('/api/admin/overview');
+ A.innerHTML=shell(`<div class="card"><b>Hôtels (${d.orgs.length})</b>${d.orgs.map(o=>`<div style="margin:8px 0">${esc(o.name)} <span class="mut">${esc(o.city)} · ${o.tickets} ticket(s)</span></div>`).join('')||'<p class="mut">Aucun.</p>'}</div>`,'/adm-org')}
+const ROUTES={'/':(A,q)=>list(A,q),'/new':(A,q)=>newT(A,q),'/dash':A=>dash(A),'/places':A=>places(A),'/team':A=>team(A),'/notifs':A=>notifPage(A),'/pmissions':A=>pmissions(A),'/pmine':A=>pmine(A),'/pprofile':A=>pprofile(A),'/admin':A=>adm(A),'/adm-com':A=>admcom(A),'/adm-org':A=>admorg(A)};
+window.onhashchange=render;render();
+</script></body></html>
